@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "noImplicitAny": false,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "rootDir": "src",
+    "strictPropertyInitialization": false,
+
+    "target": "esnext",
+    "outDir": "build/main",
+    "moduleResolution": "node",
+    "module": "commonjs",
+    "declaration": true,
+    "allowSyntheticDefaultImports": true,
+    "inlineSourceMap": false,
+    "sourceMap": true,
+    "inlineSources": false,
+    "declarationMap": true,
+    "declarationDir": "build/main",
+    "esModuleInterop": true /* Enables emit interoperability between CommonJS and ES Modules via creation of namespace objects for all imports. Implies 'allowSyntheticDefaultImports'. */,
+
+    "strict": true /* Enable all strict type-checking options. */,
+
+    /* Strict Type-Checking Options */
+    // "noImplicitAny": true /* Raise error on expressions and declarations with an implied 'any' type. */,
+    // "strictNullChecks": true /* Enable strict null checks. */,
+    // "strictFunctionTypes": true /* Enable strict checking of function types. */,
+    // "noImplicitThis": true /* Raise error on 'this' expressions with an implied 'any' type. */,
+    // "alwaysStrict": true /* Parse in strict mode and emit "use strict" for each source file. */,
+
+    /* Debugging Options */
+    "traceResolution": false /* Report module resolution log messages. */,
+    "listEmittedFiles": false /* Print names of generated files part of the compilation. */,
+    "listFiles": false /* Print names of files part of the compilation. */,
+    "pretty": true /* Stylize errors and messages using color and context. */,
+    "lib": ["es2017"],
+  },
+
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules/**", "src/**/*.spec.ts"],
+  "compileOnSave": false
+}
