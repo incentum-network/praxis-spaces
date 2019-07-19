@@ -500,7 +500,7 @@ interface PermissionDocument extends Permission {
   _praxis_permission_ledger: string
 }
 
-async function GetPermissions(space: string, ledger: string): Promise<PermissionDocument | undefined> {
+async function getPermissions(space: string, ledger: string): Promise<PermissionDocument | undefined> {
   const query = {
     query: {
       class: 'TermQuery',
@@ -532,7 +532,7 @@ function SetPermissions(state: StateJson, space: string, permissions: Permission
 export async function hasPermission(space: string, ledger: string, op: PermissionOp) {
   let permissions = getCachedPermission(space, ledger)
   if (permissions && permissions[op]) { return true }
-  permissions = await GetPermissions(space, ledger)
+  permissions = await getPermissions(space, ledger)
   if (!permissions) { return false }
   setCachedPermission(space, permissions)
   return permissions[op] ? true : false
@@ -725,7 +725,6 @@ const errorMessage = (err: { error: boolean, e?: Error}): string => {
 }
 
 function deleteDir(dir: string): Promise<void> {
-  console.log('deleteDir', dir)
   return new Promise((resolve, reject) => {
     rimraf(dir, (err, val) => {
       resolve()
@@ -750,6 +749,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       createSpace: async (space: string): Promise<SpaceResult> => {
         try {
           const hashSpace = hashSpaceName(ledger, space)
+          console.log('createSpace', hashSpace)
           await createSpace(hashSpace)
           await startSpaceIfNotStarted(hashSpace)
           await createRegisterFields(hashSpace)

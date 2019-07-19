@@ -117,6 +117,8 @@ const state: StateJson = {
   state: {},
 }
 const context = spaceExtensionContext(ledger, state)
+const anotherContext = spaceExtensionContext(anotherLedger, state)
+const anotherSpace = `${ledger}:${space}`
 setRootDir('/home/bill/.spaces-test')
 setDevEnv()
 
@@ -197,12 +199,11 @@ describe('db e2e', async () => {
     result = await context.functions.commitSpace(space)
     expect(result.error).not.toBeTruthy()
     console.log('space commited')
+    await sleep(1000)
 
   });
 
   it('so some searches', async () => {
-
-    await sleep(1000)
 
     const query = { 
       query: {
@@ -217,6 +218,95 @@ describe('db e2e', async () => {
     result = await context.functions.searchSpace(space, query)
     expect(result.error).not.toBeTruthy()
     expect(result.hits.totalHits).toBe(3)
+  });
+
+  it('test permissions', async () => {
+
+    const doc = {
+      "_praxis_permission_ledger": anotherLedger,
+      "_praxis_commitSpace": false,
+      "_praxis_addDocument": false,
+      "_praxis_deleteDocument": false,
+      "_praxis_updateDocument": false,
+      "_praxis_search": true
+	  }
+
+    result = await context.functions.setSpacePermissions(space, doc)
+    expect(result.error).not.toBeTruthy()
+
+    result = await context.functions.commitSpace(space)
+    expect(result.error).not.toBeTruthy()
+    await sleep(1000)
+
+    const doc3 = {
+	    "title": "bills document3 title",
+	    "subtitle": "bills document3 subtitle",
+	    "description": "bills document3 description"
+	  }
+    result = await anotherContext.functions.addDocumentToSpace(anotherSpace, doc3)
+    console.log('should fail', result)
+    expect(result.error).toBeTruthy()
+
+    const query = { 
+      query: {
+        class: "TermQuery",
+        field: "title",
+        term: "bills"
+      },
+      retrieveFields: ["title", "subtitle", "description"]
+    }
+
+    console.log('searchSpace', query)
+    result = await anotherContext.functions.searchSpace(anotherSpace, query)
+    expect(result.error).not.toBeTruthy()
+    expect(result.hits.totalHits).toBe(3)
+  });
+
+  it('change permission and test again', async () => {
+
+    const doc = {
+      "_praxis_permission_ledger": anotherLedger,
+      "_praxis_commitSpace": false,
+      "_praxis_addDocument": true,
+      "_praxis_deleteDocument": false,
+      "_praxis_updateDocument": false,
+      "_praxis_search": true
+	  }
+
+    result = await context.functions.setSpacePermissions(space, doc)
+    expect(result.error).not.toBeTruthy()
+
+    result = await context.functions.commitSpace(space)
+    expect(result.error).not.toBeTruthy()
+    await sleep(1000)
+
+    const doc4 = {
+	    "title": "bills document4 title",
+	    "subtitle": "bills document4 subtitle",
+	    "description": "bills document4 description"
+	  }
+    result = await anotherContext.functions.addDocumentToSpace(anotherSpace, doc4)
+    console.log('should work', result)
+    expect(result.error).not.toBeTruthy()
+
+    result = await context.functions.commitSpace(space)
+    expect(result.error).not.toBeTruthy()
+    console.log('space commited')
+    await sleep(1000)
+
+    const query = { 
+      query: {
+        class: "TermQuery",
+        field: "title",
+        term: "bills"
+      },
+      retrieveFields: ["title", "subtitle", "description"]
+    }
+
+    console.log('searchSpace', query)
+    result = await anotherContext.functions.searchSpace(anotherSpace, query)
+    expect(result.error).not.toBeTruthy()
+    expect(result.hits.totalHits).toBe(4)
   });
 
 });
