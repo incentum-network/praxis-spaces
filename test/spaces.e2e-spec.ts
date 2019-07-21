@@ -128,7 +128,6 @@ describe('db e2e', async () => {
   });
 
   afterAll(async () => {
-    console.log('deleting')
     await context.functions.deleteSpace(space)
   });
 
@@ -199,7 +198,6 @@ describe('db e2e', async () => {
     result = await context.functions.commitSpace(space)
     expect(result.error).not.toBeTruthy()
     console.log('space commited')
-    await sleep(1000)
 
   });
 
@@ -236,7 +234,6 @@ describe('db e2e', async () => {
 
     result = await context.functions.commitSpace(space)
     expect(result.error).not.toBeTruthy()
-    await sleep(1000)
 
     const doc3 = {
 	    "title": "bills document3 title",
@@ -278,7 +275,6 @@ describe('db e2e', async () => {
 
     result = await context.functions.commitSpace(space)
     expect(result.error).not.toBeTruthy()
-    await sleep(1000)
 
     const doc4 = {
 	    "title": "bills document4 title",
@@ -292,7 +288,6 @@ describe('db e2e', async () => {
     result = await context.functions.commitSpace(space)
     expect(result.error).not.toBeTruthy()
     console.log('space commited')
-    await sleep(1000)
 
     const query = { 
       query: {

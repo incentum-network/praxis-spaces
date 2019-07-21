@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { uniqueKey, StateJson, hashString } from '@incentum/praxis-interfaces'
-import rimraf from 'rimraf'
+import isNode from 'detect-node'
 
 let port = 5000
 let host = '127.0.0.1'
@@ -129,6 +129,12 @@ export function setHost(h: string) {
   host = h
 }
 
+function sleep(ms) {
+  return new Promise((resolve) =>
+    setTimeout(resolve, ms)
+  );
+}
+
 export function getRootDir(space: string): string {
   return `${rootDir}/${space}`
 }
@@ -143,6 +149,7 @@ export async function deleteSpace(space: string): Promise<void> {
 
 export async function commitSpace(space: string): Promise<number> {
   const resp = await axios.post(`${getUrl()}/commit`, {indexName: space})
+  await sleep(1000) // this is a hack for now, needs to be fixed on backend - it seems to do a merge which can hose an immediate search
   return resp.data.indexGen || 0
 }
 
@@ -544,7 +551,21 @@ interface StartedSpace {
 }
 
 export async function getDirectoryHash(space: string): Promise<string> {
-  return uniqueKey()
+  if (isNode) {
+    const { hashElement } = await import('folder-hash')
+    const dir = `${getRootDir(space)}/shard0/index`
+    const opts = { 
+      algo: 'sha256', 
+      encoding: 'hex', 
+      files: { 
+        exclude: 'write.lock'
+      }
+    }
+    const hashes = await hashElement(dir, opts)
+    return hashes.hash
+  } else {
+    return uniqueKey()
+  }
 }
 
 export interface Commit {
@@ -725,10 +746,15 @@ const errorMessage = (err: { error: boolean, e?: Error}): string => {
 }
 
 function deleteDir(dir: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    rimraf(dir, (err, val) => {
+  return new Promise(async (resolve, reject) => {
+    if (isNode) {
+      const rimraf = (await import('rimraf')).default
+      rimraf(dir, (err, val) => {
+        resolve()
+      })
+    } else {
       resolve()
-    })
+    }
   })
 }
 
@@ -749,7 +775,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       createSpace: async (space: string): Promise<SpaceResult> => {
         try {
           const hashSpace = hashSpaceName(ledger, space)
-          console.log('createSpace', hashSpace)
           await createSpace(hashSpace)
           await startSpaceIfNotStarted(hashSpace)
           await createRegisterFields(hashSpace)
