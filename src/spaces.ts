@@ -972,13 +972,11 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           store: true,
           type: 'double',
           sort: true,
-        },
+        },    
         keywordField : {
-          analyzer: {
-            class: 'KeywordAnalyzer',
-          },
           store: true,
-          type: 'text',
+          type: 'atom',
+          search: true,
         },
         whitespaceTextField : {
           analyzer: {
