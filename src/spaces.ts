@@ -13,6 +13,7 @@ export function hashSpaceName(ledger: string, space: string) {
 
 export interface ExtensionContext {
   functions: any
+  sections: any
 }
 
 const startedSpaces = new Map<string, StartedSpace>()
@@ -28,24 +29,27 @@ export async function endChain() {
 }
 
 function setCachedPermission(space: string, permissions: PermissionDocument) {
-  const ledger = permissions._praxis_permission_ledger
+  const key = permissionKey(permissions._praxis_permission_ledger,permissions._praxis_permission_contract)
   let spacePerms = cachedPermissions.get(space)
   if (!spacePerms) {
     spacePerms = new Map<string, PermissionDocument>()
     cachedPermissions.set(space, spacePerms)
   }
-  spacePerms.set(ledger, permissions)
+  spacePerms.set(key, permissions)
 }
 
-function removeCachedPermission(space: string, ledger: string): void {
+function removeCachedPermission(space: string, ledger: string, contract: string): void {
   const spacePerms = cachedPermissions.get(space)
   if (!spacePerms) { return }
-  spacePerms.delete(ledger)
+  const key = permissionKey(ledger, contract)
+  spacePerms.delete(key)
 }
 
-function getCachedPermission(space: string, ledger: string): PermissionDocument | undefined {
+export const defaultPermissionLedger = '_defaults_'
+function getCachedPermission(space: string, ledger: string, contract: string): PermissionDocument | undefined {
   const spacePerms = cachedPermissions.get(space)
-  return spacePerms ? spacePerms.get(ledger) : undefined
+  if (!spacePerms) { return undefined }
+  return spacePerms.get(permissionKey(ledger, contract))
 }
 
 export interface Analyzer {
@@ -79,6 +83,8 @@ export interface Analyzer {
   tokenizer?: string
 }
 
+export type FieldType = 'atom' | 'text' | 'boolean' | 'long' | 'int' | 'double' | 'float' | 'lat_lon' | 'datetime' | 'virtual'
+
 export interface SpaceField {
   analyzer?: Analyzer
   dateTimeFormat?: string
@@ -107,7 +113,7 @@ export interface SpaceField {
   storeDocValues?: boolean
   termVectors?: string
   tokenize?: boolean
-  type: 'atom' | 'text' | 'boolean' | 'long' | 'int' | 'double' | 'float' | 'lat_lon' | 'date_time' | 'virtual'
+  type: FieldType
 }
 
 export interface UpdateDoc {
@@ -132,7 +138,7 @@ export function setHost(h: string) {
 function sleep(ms) {
   return new Promise((resolve) =>
     setTimeout(resolve, ms)
-  );
+  )
 }
 
 export function getRootDir(space: string): string {
@@ -358,7 +364,7 @@ export interface WildcardQuery extends Query {
 }
 
 export interface TextQuery extends Query {
-  defaultField: string
+  defaultField?: string
   text: string
 }
 
@@ -371,12 +377,8 @@ export interface Facet {
   useOrdsCache?: boolean
 }
 
-export interface QueryParser {
-  class?: 'classic' | 'SimpleQueryParser' | 'MultiFieldQueryParser'
-}
-
-export interface ClassicQueryParser extends QueryParser {
-  class?: 'classic'
+export interface ClassicQueryParser {
+  class: 'classic'
   defaultField: string
 
   defaultOperator?: string
@@ -387,7 +389,7 @@ export interface ClassicQueryParser extends QueryParser {
   phraseSlop?: number
 }
 
-export interface MultiFieldQueryParser extends QueryParser {
+export interface MultiFieldQueryParser {
   class: 'MultiFieldQueryParser'
   fields?: string[]
   defaultOperator?: string
@@ -398,7 +400,7 @@ export interface MultiFieldQueryParser extends QueryParser {
   phraseSlop?: number
 }
 
-export interface SimpleQueryParser extends QueryParser {
+export interface SimpleQueryParser {
   class: 'SimpleQueryParser'
   fields: string[]
   operators: string[]
@@ -411,6 +413,8 @@ export interface SimpleQueryParser extends QueryParser {
   phraseSlop?: number
 }
 
+export type QueryParsers = SimpleQueryParser | MultiFieldQueryParser | ClassicQueryParser
+
 export interface Sort {
   doDocScores?: boolean
   doMaxScore?: boolean
@@ -419,7 +423,7 @@ export interface Sort {
 
 export interface SpaceSearch {
   queryText?: string
-  queryParser?: QueryParser
+  queryParser?: QueryParsers
   query?: any
   grouping?: {
     field: string
@@ -470,13 +474,13 @@ export interface Hits {
 
 export type HashSpaceName = (ledger: string, space: string) => string
 
-export async function getSpaceName(ledger: string, space: string, op: PermissionOp): Promise<string> {
+export async function getSpaceName(ledger: string, contract: string, space: string, op: PermissionOp): Promise<string> {
   const maybeLedger = space.split(':')
   if (maybeLedger.length === 1) { return hashSpaceName(ledger, space) }
   const spaceName = hashSpaceName(maybeLedger[0], maybeLedger[1])
   if (op === PermissionOp.any) { return spaceName }
   if (op === PermissionOp.none) { throw new Error('Permission denied')}
-  const has = await hasPermission(spaceName, ledger, op)
+  const has = await hasPermission(spaceName, ledger, contract, op)
   if (!has) { throw new Error('Permission denied')}
   return spaceName
 }
@@ -502,19 +506,26 @@ interface Permission {
   _praxis_search: boolean
 }
 
+const permissionKeyField = '_praxis_permission_key'
 const permissionLedgerField = '_praxis_permission_ledger'
+const permissionContractField = '_praxis_permission_contract'
 interface PermissionDocument extends Permission {
+  _praxis_permission_key?: string
   _praxis_permission_ledger: string
+  _praxis_permission_contract: string
 }
 
-async function getPermissions(space: string, ledger: string): Promise<PermissionDocument | undefined> {
-  const query = {
+export const permissionKey = (ledger, contract) => `${contract}/${ledger}`
+async function getPermissions(space: string, ledger: string, contract: string): Promise<PermissionDocument | undefined> {
+  const query = { 
     query: {
-      class: 'TermQuery',
-      field: permissionLedgerField,
-      term: ledger,
+      class: "TermQuery",
+      field: permissionKeyField,
+      term: permissionKey(ledger, contract)
     },
     retrieveFields: [
+      permissionKeyField,
+      permissionContractField,
       permissionLedgerField,
       '_praxis_commitSpace',
       '_praxis_addDocument',
@@ -531,18 +542,23 @@ async function getPermissions(space: string, ledger: string): Promise<Permission
 
 function SetPermissions(state: StateJson, space: string, permissions: PermissionDocument): void {
   const ledger = permissions._praxis_permission_ledger
-  deleteDocumentFromSpace(state, space, permissionLedgerField, [ledger])
+  const contract = permissions._praxis_permission_contract
+  const key = permissionKey(ledger, contract)
+  permissions._praxis_permission_key = key;
+  deleteDocumentFromSpace(state, space, permissionKeyField, [key])
   addDocumentToSpace(state, space, permissions)
-  removeCachedPermission(space, ledger)
+  removeCachedPermission(space, ledger, contract)
 }
 
-export async function hasPermission(space: string, ledger: string, op: PermissionOp) {
-  let permissions = getCachedPermission(space, ledger)
-  if (permissions && permissions[op]) { return true }
-  permissions = await getPermissions(space, ledger)
-  if (!permissions) { return false }
-  setCachedPermission(space, permissions)
-  return permissions[op] ? true : false
+export async function hasPermission(space: string, ledger: string, contract: string, op: PermissionOp) {
+  let permissions = getCachedPermission(space, ledger, contract)
+  if (permissions) { return permissions[op] ? true : false }
+  permissions = await getPermissions(space, ledger, contract)
+  if (permissions) {
+    setCachedPermission(space, permissions)
+    return permissions[op] ? true : false
+  }
+  return ledger === defaultPermissionLedger ? false : await hasPermission(space, defaultPermissionLedger, contract, op)
 }
 
 interface StartedSpace {
@@ -554,12 +570,12 @@ export async function getDirectoryHash(space: string): Promise<string> {
   if (isNode) {
     const { hashElement } = await import('folder-hash')
     const dir = `${getRootDir(space)}/shard0/index`
-    const opts = { 
-      algo: 'sha256', 
-      encoding: 'hex', 
-      files: { 
-        exclude: 'write.lock'
-      }
+    const opts = {
+      algo: 'sha256',
+      encoding: 'hex',
+      files: {
+        exclude: 'write.lock',
+      },
     }
     const hashes = await hashElement(dir, opts)
     return hashes.hash
@@ -667,12 +683,19 @@ async function createRegisterFields(space: string) {
     store: true,
     type: 'boolean',
   }
+  const keywordField: SpaceField = {
+    store: true,
+    type: 'atom',
+    search: true,
+  }
 
   await registerFields(space, {
-    _praxis_space: fieldSpec,
-    _praxis_ledger: fieldSpec,
+    _praxis_space: keywordField,
+    _praxis_ledger: keywordField,
     _praxis_created: fieldSpec,
-    _praxis_permission_ledger: fieldSpec,
+    _praxis_permission_key: keywordField,
+    _praxis_permission_ledger: keywordField,
+    _praxis_permission_contract: keywordField,
     _praxis_commitSpace: booleanSpec,
     _praxis_addDocument: booleanSpec,
     _praxis_updateDocument: booleanSpec,
@@ -681,8 +704,8 @@ async function createRegisterFields(space: string) {
   })
 }
 
-async function writeFirstDocument(space: string, ledger: string) {
-  await addDocument(space, {
+async function writeFirstDocument(space: string, ledger: string, state: StateJson) {
+  await addDocumentToSpace(state, space, {
     _praxis_space: space,
     _praxis_ledger: ledger,
     _praxis_created: 'Space created',
@@ -758,13 +781,13 @@ function deleteDir(dir: string): Promise<void> {
   })
 }
 
-export const spaceExtensionContext = (ledger: string, state: StateJson): ExtensionContext => {
+export const spaceExtensionContext = (ledger: string, state: StateJson, contract: string): ExtensionContext => {
 
   const context: ExtensionContext = {
     functions: {
       searchSpace: async (space: string, search: SpaceSearch, commit?: Commit): Promise<SearchSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.search)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.search)
           await startSpaceIfNotStarted(hashSpace)
           const hits = await searchSpace(hashSpace, search, commit)
           return { error: false, hits }
@@ -772,13 +795,20 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
           return { error: true, e }
         }
       },
-      createSpace: async (space: string): Promise<SpaceResult> => {
+      createSpace: async (space: string, permissions: PermissionDocument | undefined): Promise<SpaceResult> => {
         try {
           const hashSpace = hashSpaceName(ledger, space)
           await createSpace(hashSpace)
           await startSpaceIfNotStarted(hashSpace)
           await createRegisterFields(hashSpace)
-          await writeFirstDocument(hashSpace, ledger)
+          await writeFirstDocument(hashSpace, ledger, state)
+          if (permissions) {
+            permissions._praxis_permission_key = permissionKey(defaultPermissionLedger, contract)
+            permissions._praxis_permission_contract = contract
+            permissions._praxis_permission_ledger = defaultPermissionLedger
+            addDocumentToSpace(state, hashSpace, permissions)
+            setCachedPermission(hashSpace, permissions)
+          }
           await commitSpace(hashSpace)
           return { error: false }
         } catch (e) {
@@ -788,7 +818,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       startSpace: async (space: string, commit?: Commit): Promise<StartSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
           await startSpaceIfNotStarted(hashSpace, commit)
           return { error: false, commit }
         } catch (e) {
@@ -797,7 +827,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       stopSpace: async (space: string): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
           if (startedSpaces.get(hashSpace)) {
             await stopSpace(hashSpace)
             startedSpaces.delete(hashSpace)
@@ -810,7 +840,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       deleteSpace: async (space: string): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
           await deleteSpace(hashSpace)
           const dir = getRootDir(hashSpace)
           await deleteDir(dir)
@@ -822,7 +852,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       commitSpace: async (space: string): Promise<StartSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.commitSpace)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.commitSpace)
           await startSpaceIfNotStarted(hashSpace)
           try {
             await commitDocActions(state, hashSpace)
@@ -830,7 +860,8 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
             const gen = await commitSpace(hashSpace)
             return { error: false, commit: { gen, hash, space: hashSpace } }
           } catch (e) {
-            await rollbackSpace(space, state)
+            console.log('commitSpace failed', e)
+            await rollbackSpace(hashSpace, state)
             return { error: true, e }
           }
         } catch (e) {
@@ -840,7 +871,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       registerFieldsForSpace: async (space: string, fields: any): Promise<RegisterFieldsSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
           await startSpaceIfNotStarted(hashSpace)
           const ret = await registerFields(hashSpace, fields)
           return { error: false, fields: ret.data }
@@ -851,7 +882,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       addDocumentToSpace: async (space: string, fields: any): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.addDocument)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.addDocument)
           addDocumentToSpace(state, hashSpace, fields)
           return { error: false }
         } catch (e) {
@@ -859,9 +890,16 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
           return { error: true, e }
         }
       },
+      addDocumentToSpaceThenCommit: async (space: string, fields: any): Promise<SpaceResult> => {
+        const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.addDocument)
+        addDocumentToSpace(state, hashSpace, fields)
+        const commit = await context.functions.commitSpace(space)
+        if (!commit.error) { return commit }
+        throw commit.e
+      },
       deleteDocumentsFromSpace: async (space: string, field: string, values: any): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.deleteDocument)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.deleteDocument)
           deleteDocumentFromSpace(state, hashSpace, field, values)
           return { error: false }
         } catch (e) {
@@ -871,7 +909,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       updateDocumentInSpace: async (space: string, term: UpdateDoc, fields: any): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.updateDocument)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.updateDocument)
           updateDocumentInSpace(state, hashSpace, term, fields)
           return { error: false }
         } catch (e) {
@@ -881,7 +919,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       },
       setSpacePermissions: async (space: string, permissions: PermissionDocument): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
           SetPermissions(state, hashSpace, permissions)
           return { error: false }
         } catch (e) {
@@ -895,6 +933,81 @@ export const spaceExtensionContext = (ledger: string, state: StateJson): Extensi
       errorMessage,
       errorStack: (err: { error: boolean, e?: Error}): string => {
         return err.e && err.e.stack ? err.e.stack : 'nostack'
+      },
+    },
+    sections: {
+      fields: {
+        intField : {
+          store: true,
+          type: 'int',
+        },
+        sortedIntField : {
+          store: true,
+          type: 'int',
+          sort: true,
+        },
+        longField : {
+          store: true,
+          type: 'long',
+        },
+        sortedLongField : {
+          store: true,
+          type: 'long',
+          sort: true,
+        },
+        floatField : {
+          store: true,
+          type: 'float',
+        },
+        sortedFloatField : {
+          store: true,
+          type: 'float',
+          sort: true,
+        },
+        doubleField : {
+          store: true,
+          type: 'double',
+        },
+        sortedDoubleField : {
+          store: true,
+          type: 'double',
+          sort: true,
+        },
+        keywordField : {
+          analyzer: {
+            class: 'KeywordAnalyzer',
+          },
+          store: true,
+          type: 'text',
+        },
+        whitespaceTextField : {
+          analyzer: {
+            class: 'WhitespaceAnalyzer',
+          },
+          similarity: {
+            class: 'BM25Similarity',
+            b: 0.15,
+          },
+          store: true,
+          type: 'text',
+        },
+        standardTextField : {
+          analyzer: {
+            class: 'StandardAnalyzer',
+          },
+          similarity: {
+            class: 'BM25Similarity',
+            b: 0.15,
+          },
+          store: true,
+          type: 'text',
+        },
+        dateTimeField_yyyy_MM_dd: {
+          type: 'datetime',
+          store: true,
+          sort: true,
+          dateTimeFormat: 'yyyy-MM-dd',
+        },
       },
     },
   }
