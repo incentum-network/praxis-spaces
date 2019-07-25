@@ -812,7 +812,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           await commitSpace(hashSpace)
           return { error: false }
         } catch (e) {
-          console.log('createSpace error', e)
           return { error: true, e }
         }
       },
@@ -834,7 +833,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           }
           return { error: false }
         } catch (e) {
-          console.log('stopSpace error', e)
           return { error: true, e }
         }
       },
@@ -846,7 +844,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           await deleteDir(dir)
           return { error: false }
         } catch (e) {
-          console.log('deleteSpace error', e)
           return { error: true, e }
         }
       },
@@ -860,12 +857,10 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
             const gen = await commitSpace(hashSpace)
             return { error: false, commit: { gen, hash, space: hashSpace } }
           } catch (e) {
-            console.log('commitSpace failed', e)
             await rollbackSpace(hashSpace, state)
             return { error: true, e }
           }
         } catch (e) {
-          console.log('commitSpace error', e)
           return { error: true, e }
         }
       },
@@ -876,7 +871,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           const ret = await registerFields(hashSpace, fields)
           return { error: false, fields: ret.data }
         } catch (e) {
-          console.log('registerFieldsForSpace error', e)
           return { error: true, e }
         }
       },
@@ -886,7 +880,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           addDocumentToSpace(state, hashSpace, fields)
           return { error: false }
         } catch (e) {
-          console.log('addDocumentToSpace error', e)
           return { error: true, e }
         }
       },
@@ -903,7 +896,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           deleteDocumentFromSpace(state, hashSpace, field, values)
           return { error: false }
         } catch (e) {
-          console.log('deleteDocumentFromSpace error', e)
           return { error: true, e }
         }
       },
@@ -913,7 +905,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           updateDocumentInSpace(state, hashSpace, term, fields)
           return { error: false }
         } catch (e) {
-          console.log('updateDocumentInSpace error', e)
           return { error: true, e }
         }
       },
@@ -923,7 +914,6 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
           SetPermissions(state, hashSpace, permissions)
           return { error: false }
         } catch (e) {
-          console.log('setSpacePermissions error', e)
           return { error: true, e }
         }
       },
