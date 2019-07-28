@@ -188,8 +188,9 @@ export async function rollback(space: string): Promise<void> {
   await axios.post(`${getUrl()}/rollback`, {indexName: space})
 }
 
-export async function searchSpace(space: string, search: SpaceSearch, commit?: Commit): Promise<Hits> {
-  const parms = commit ? {indexName: space, ...search, indexGen: commit.gen} : {indexName: space, ...search}
+export async function searchSpace(space: string, search: SpaceSearch, findLatestCommit: FindLatestCommit): Promise<Hits> {
+  const commit = await findLatestCommit(space);
+  const parms = commit ? {indexName: space, ...search, version: commit.version} : {indexName: space, ...search}
   const ret = await axios.post(`${getUrl()}/search`, parms)
   return ret.data
 }
@@ -468,19 +469,22 @@ export interface Hit {
 export interface Hits {
   totalHits: number
   hits: Hit[]
-  // TODO need to get commit for searches
-  commit?: Commit
+  searchState: SearchState
+}
+
+export interface SearchState {
+  searcher: number
 }
 
 export type HashSpaceName = (ledger: string, space: string) => string
 
-export async function getSpaceName(ledger: string, contract: string, space: string, op: PermissionOp): Promise<string> {
+export async function getSpaceName(ledger: string, contract: string, space: string, op: PermissionOp, findLatestCommit: FindLatestCommit): Promise<string> {
   const maybeLedger = space.split(':')
   if (maybeLedger.length === 1) { return hashSpaceName(ledger, space) }
   const spaceName = hashSpaceName(maybeLedger[0], maybeLedger[1])
   if (op === PermissionOp.any) { return spaceName }
   if (op === PermissionOp.none) { throw new Error('Permission denied')}
-  const has = await hasPermission(spaceName, ledger, contract, op)
+  const has = await hasPermission(spaceName, ledger, contract, op, findLatestCommit)
   if (!has) { throw new Error('Permission denied')}
   return spaceName
 }
@@ -516,7 +520,7 @@ interface PermissionDocument extends Permission {
 }
 
 export const permissionKey = (ledger, contract) => `${contract}/${ledger}`
-async function getPermissions(space: string, ledger: string, contract: string): Promise<PermissionDocument | undefined> {
+async function getPermissions(space: string, ledger: string, contract: string, findLatestCommit: FindLatestCommit): Promise<PermissionDocument | undefined> {
   const query = { 
     query: {
       class: "TermQuery",
@@ -535,7 +539,7 @@ async function getPermissions(space: string, ledger: string, contract: string): 
     ],
   }
 
-  const hits = await searchSpace(space, query)
+  const hits = await searchSpace(space, query, findLatestCommit)
   if (hits.totalHits === 0) { return undefined }
   return hits.hits[0].fields as PermissionDocument
 }
@@ -550,15 +554,17 @@ function SetPermissions(state: StateJson, space: string, permissions: Permission
   removeCachedPermission(space, ledger, contract)
 }
 
-export async function hasPermission(space: string, ledger: string, contract: string, op: PermissionOp) {
+export type FindLatestCommit = (string) => Promise<Commit | undefined>
+
+export async function hasPermission(space: string, ledger: string, contract: string, op: PermissionOp, findLatestCommit: FindLatestCommit) {
   let permissions = getCachedPermission(space, ledger, contract)
   if (permissions) { return permissions[op] ? true : false }
-  permissions = await getPermissions(space, ledger, contract)
+  permissions = await getPermissions(space, ledger, contract, findLatestCommit)
   if (permissions) {
     setCachedPermission(space, permissions)
     return permissions[op] ? true : false
   }
-  return ledger === defaultPermissionLedger ? false : await hasPermission(space, defaultPermissionLedger, contract, op)
+  return ledger === defaultPermissionLedger ? false : await hasPermission(space, defaultPermissionLedger, contract, op, findLatestCommit)
 }
 
 interface StartedSpace {
@@ -585,7 +591,7 @@ export async function getDirectoryHash(space: string): Promise<string> {
 }
 
 export interface Commit {
-  gen: number
+  version: number
   hash: string
   space: string
 }
@@ -658,11 +664,14 @@ type DocActions = AddDocAction | DeleteDocAction | UpdateDocAction
 
 interface StateSpace {
   docActions: DocActions[]
+  commits: Commit[]
+  locks: Commit[]
 }
 
 function initSpace(state: StateJson): StateSpace {
   if (!state.state._stateSpace) {
-    state.state._stateSpace = { docActions: [] }
+    const stateSpace: StateSpace = { docActions: [], commits: [], locks: [] }
+    state.state._stateSpace = stateSpace
   }
   return state.state._stateSpace
 }
@@ -710,6 +719,16 @@ async function writeFirstDocument(space: string, ledger: string, state: StateJso
     _praxis_ledger: ledger,
     _praxis_created: 'Space created',
   })
+}
+
+function addCommitToSpace(state: StateJson, commit: Commit) {
+  const stateSpace = initSpace(state)
+  stateSpace.commits.push(commit)
+}
+
+function addLockToSpace(state: StateJson, space: string, version: number) {
+  const stateSpace = initSpace(state)
+  stateSpace.locks.push({ version, space, hash: ''})
 }
 
 function addDocumentToSpace(state: StateJson, space: string, fields: any) {
@@ -781,15 +800,18 @@ function deleteDir(dir: string): Promise<void> {
   })
 }
 
-export const spaceExtensionContext = (ledger: string, state: StateJson, contract: string): ExtensionContext => {
+export const spaceExtensionContext = (ledger: string, state: StateJson, contract: string, findLatestCommit: FindLatestCommit): ExtensionContext => {
 
   const context: ExtensionContext = {
     functions: {
-      searchSpace: async (space: string, search: SpaceSearch, commit?: Commit): Promise<SearchSpaceResult> => {
+      searchSpace: async (space: string, search: SpaceSearch, lock: boolean = false): Promise<SearchSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.search)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.search, findLatestCommit)
           await startSpaceIfNotStarted(hashSpace)
-          const hits = await searchSpace(hashSpace, search, commit)
+          const hits = await searchSpace(hashSpace, search, findLatestCommit)
+          if (lock) {
+            addLockToSpace(state, hashSpace, hits.searchState.searcher)
+          }
           return { error: false, hits }
         } catch (e) {
           return { error: true, e }
@@ -817,7 +839,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       startSpace: async (space: string, commit?: Commit): Promise<StartSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none, findLatestCommit)
           await startSpaceIfNotStarted(hashSpace, commit)
           return { error: false, commit }
         } catch (e) {
@@ -826,7 +848,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       stopSpace: async (space: string): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none, findLatestCommit)
           if (startedSpaces.get(hashSpace)) {
             await stopSpace(hashSpace)
             startedSpaces.delete(hashSpace)
@@ -838,7 +860,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       deleteSpace: async (space: string): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none, findLatestCommit)
           await deleteSpace(hashSpace)
           const dir = getRootDir(hashSpace)
           await deleteDir(dir)
@@ -849,13 +871,15 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       commitSpace: async (space: string): Promise<StartSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.commitSpace)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.commitSpace, findLatestCommit)
           await startSpaceIfNotStarted(hashSpace)
           try {
             await commitDocActions(state, hashSpace)
-            const hash = await getDirectoryHash(hashSpace) // or let commitSpace do this
-            const gen = await commitSpace(hashSpace)
-            return { error: false, commit: { gen, hash, space: hashSpace } }
+            const hash = await getDirectoryHash(hashSpace)
+            const version = await commitSpace(hashSpace)
+            const commit = { version, hash, space: hashSpace }
+            addCommitToSpace(state, commit)
+            return { error: false, commit }
           } catch (e) {
             await rollbackSpace(hashSpace, state)
             return { error: true, e }
@@ -866,7 +890,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       registerFieldsForSpace: async (space: string, fields: any): Promise<RegisterFieldsSpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none, findLatestCommit)
           await startSpaceIfNotStarted(hashSpace)
           const ret = await registerFields(hashSpace, fields)
           return { error: false, fields: ret.data }
@@ -876,7 +900,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       addDocumentToSpace: async (space: string, fields: any): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.addDocument)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.addDocument, findLatestCommit)
           addDocumentToSpace(state, hashSpace, fields)
           return { error: false }
         } catch (e) {
@@ -884,7 +908,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
         }
       },
       addDocumentToSpaceThenCommit: async (space: string, fields: any): Promise<SpaceResult> => {
-        const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.addDocument)
+        const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.addDocument, findLatestCommit)
         addDocumentToSpace(state, hashSpace, fields)
         const commit = await context.functions.commitSpace(space)
         if (!commit.error) { return commit }
@@ -892,7 +916,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       deleteDocumentsFromSpace: async (space: string, field: string, values: any): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.deleteDocument)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.deleteDocument, findLatestCommit)
           deleteDocumentFromSpace(state, hashSpace, field, values)
           return { error: false }
         } catch (e) {
@@ -901,7 +925,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       updateDocumentInSpace: async (space: string, term: UpdateDoc, fields: any): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.updateDocument)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.updateDocument, findLatestCommit)
           updateDocumentInSpace(state, hashSpace, term, fields)
           return { error: false }
         } catch (e) {
@@ -910,7 +934,7 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       },
       setSpacePermissions: async (space: string, permissions: PermissionDocument): Promise<SpaceResult> => {
         try {
-          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none)
+          const hashSpace = await getSpaceName(ledger, contract, space, PermissionOp.none, findLatestCommit)
           SetPermissions(state, hashSpace, permissions)
           return { error: false }
         } catch (e) {
