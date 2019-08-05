@@ -466,10 +466,16 @@ export interface Hit {
   score: number
 }
 
+export interface FacetHit {
+  counts: any[]
+  childCount: number
+}
+
 export interface Hits {
   totalHits: number
   hits: Hit[]
   searchState: SearchState
+  facets: FacetHit[]
 }
 
 export interface SearchState {
