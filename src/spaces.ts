@@ -954,6 +954,29 @@ export const spaceExtensionContext = (ledger: string, state: StateJson, contract
       errorStack: (err: { error: boolean, e?: Error}): string => {
         return err.e && err.e.stack ? err.e.stack : 'nostack'
       },
+      term: (key: string, val: string): string => {
+        return `${key}:"${val}"`
+      },
+      getSingleHit: (res: SearchSpaceResult, type: string) => {
+        if (res.error) { throw new Error(`search failed for ${type} ${context.functions.errorMessage(res)}`) }
+        if (res.hits!.totalHits !== 1) { throw new Error(`${type} not found or too many`) }
+        return res.hits!.hits[0].fields
+      },
+      query: (parts: string[], retrieveFields: string[], defaultOperator = 'and', defaultField = 'id') => {
+        const terms: string[] = []
+        for (let i = 0; i < parts.length; i += 2) {
+          terms.push(context.functions.term(parts[i], parts[i+1]))
+        }
+        return {
+          queryParser: {
+            class: 'classic',
+            defaultOperator,
+            defaultField,
+          },
+          queryText: terms.join(' '),
+          retrieveFields,
+        };
+      },
     },
     sections: {
       fields: {
