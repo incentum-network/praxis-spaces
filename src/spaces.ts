@@ -527,6 +527,8 @@ interface PermissionDocument extends Permission {
 
 export const permissionKey = (ledger, contract) => `${contract}/${ledger}`
 async function getPermissions(space: string, ledger: string, contract: string, findLatestCommit: FindLatestCommit): Promise<PermissionDocument | undefined> {
+  await startSpaceIfNotStarted(space)
+  
   const query = { 
     query: {
       class: "TermQuery",
