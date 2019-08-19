@@ -1,6 +1,6 @@
 {
   "name": "@incentum/praxis-spaces",
-  "version": "1.0.371",
+  "version": "1.0.372",
   "description": "Praxis Spaces Lib",
   "author": "Incentum",
   "license": "TUL",
@@ -36,7 +36,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@incentum/praxis-interfaces": "^1.0.353",
+    "@incentum/praxis-interfaces": "^1.0.354",
     "@types/lodash": "^4.14.113",
     "axios": "^0.19.0",
     "detect-node": "^2.0.4",
