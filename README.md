@@ -1,5 +1,5 @@
-# praxis-db
+# praxis-spaces
 
-Database manangement library for Praxis. Uses TypeORM. 
+Praxis Spaces
 
-Stores and retrieves Computational DAG in a relational database.
+Object storage and full text search for Praxis Smart Contracts
